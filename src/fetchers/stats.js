@@ -158,6 +158,60 @@ const statsFetcher = async ({
   return stats;
 };
 
+const fetchOrgStars = async (org) => {
+  let stars = 0;
+  let hasNextPage = true;
+  let after = null;
+
+  while (hasNextPage) {
+    const res = await retryer(
+      (variables, token) =>
+        request(
+          {
+            query: `
+              query ($org: String!, $after: String) {
+                organization(login: $org) {
+                  repositories(first: 100, after: $after) {
+                    nodes {
+                      stargazers {
+                        totalCount
+                      }
+                    }
+                    pageInfo {
+                      hasNextPage
+                      endCursor
+                    }
+                  }
+                }
+              }
+            `,
+            variables,
+          },
+          {
+            Authorization: `bearer ${token}`,
+          }
+        ),
+      { org, after }
+    );
+
+    if (res.data.errors) {
+      throw new Error("Failed to fetch organization repositories");
+    }
+
+    const repos = res.data.data.organization.repositories;
+
+    for (const repo of repos.nodes) {
+      stars += repo.stargazers.totalCount;
+    }
+
+    hasNextPage = repos.pageInfo.hasNextPage;
+    after = repos.pageInfo.endCursor;
+  }
+
+  return stars;
+};
+
+
 /**
  * Fetch total commits using the REST API.
  *
@@ -321,6 +375,12 @@ const fetchStats = async (
     .reduce((prev, curr) => {
       return prev + curr.stargazers.totalCount;
     }, 0);
+
+  // hardcode organization stars for SlaVcE14 since they are not included in the stats
+  if (user.login === "SlaVcE14") {
+    const orgStars = await fetchOrgStars("SJ14Apps");
+    stats.totalStars += orgStars;
+  }
 
   stats.rank = calculateRank({
     all_commits: include_all_commits,
